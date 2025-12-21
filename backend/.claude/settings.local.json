@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(superpowers:brainstorming)",
+      "Bash(bun run typecheck:*)",
+      "Skill(superpowers:test-driven-development)",
+      "Bash(bun test:*)",
+      "Bash(bun run dev:*)",
+      "Bash(curl:*)",
+      "Bash(USER_ID=\"e898ca74-6c3d-4423-be36-2d6e63266460\":*)",
+      "Bash(ORG_ID=\"31f8326a-f290-4baa-9e03-2ce9929a204c\")",
+      "Bash(PGPASSWORD='frf@!333!@Fg' psql:*)"
+    ]
+  }
+}
