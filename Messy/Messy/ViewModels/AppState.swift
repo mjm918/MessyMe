@@ -504,7 +504,7 @@ class AppState: ObservableObject {
 
     // MARK: - Recording Operations
 
-    func createRecording(type: RecordingType, title: String?, transcript: String?, duration: Int?) async {
+    func createRecording(type: RecordingType, title: String?, transcript: String?, audioUrl: String?, duration: Int?) async {
         guard let user = currentUser, let org = currentOrg else { return }
 
         do {
@@ -514,11 +514,32 @@ class AppState: ObservableObject {
                 type: type,
                 title: title,
                 transcript: transcript,
+                audioUrl: audioUrl,
                 durationSeconds: duration
             )
             withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                 recordings.insert(recording, at: 0)
             }
+        } catch {
+            showError(error)
+        }
+    }
+    
+    func uploadAndCreateRecording(type: RecordingType, title: String?, transcript: String?, audioData: Data, filename: String, duration: Int?) async {
+        guard let org = currentOrg else { return }
+        
+        do {
+            // First upload the audio file
+            let uploadResponse = try await api.uploadAudio(orgId: org.id, audioData: audioData, filename: filename)
+            
+            // Then create the recording with the audio URL
+            await createRecording(
+                type: type,
+                title: title,
+                transcript: transcript,
+                audioUrl: uploadResponse.audioUrl,
+                duration: duration
+            )
         } catch {
             showError(error)
         }

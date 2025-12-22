@@ -165,12 +165,13 @@ struct Recording: Codable, Identifiable {
     let type: RecordingType
     let title: String?
     let transcript: String?
+    let audioUrl: String?
     let durationSeconds: Int?
     let createdAt: Date?
     let updatedAt: Date?
 
     enum CodingKeys: String, CodingKey {
-        case id, type, title, transcript, orgId, userId, durationSeconds, createdAt, updatedAt
+        case id, type, title, transcript, audioUrl, orgId, userId, durationSeconds, createdAt, updatedAt
     }
 }
 
@@ -179,6 +180,7 @@ struct CreateRecordingRequest: Codable {
     let type: RecordingType
     var title: String?
     var transcript: String?
+    var audioUrl: String?
     var durationSeconds: Int?
 }
 
@@ -186,6 +188,7 @@ struct UpdateRecordingRequest: Codable {
     var type: RecordingType?
     var title: String?
     var transcript: String?
+    var audioUrl: String?
     var durationSeconds: Int?
 }
 

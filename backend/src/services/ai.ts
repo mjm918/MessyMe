@@ -9,7 +9,7 @@ const google = createGoogleGenerativeAI({
   apiKey: process.env.GEMINI_API_KEY!,
 });
 
-const model = google("gemini-2.5-pro");
+const model = google("gemini-flash-latest");
 
 export interface RAGContext {
   results: SearchResult[];

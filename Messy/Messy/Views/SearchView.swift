@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import AVFoundation
 
 // MARK: - Helper Types
 
@@ -16,6 +17,16 @@ struct IdentifiableTask: Identifiable {
     init(task: TaskItem) {
         self.id = task.id
         self.task = task
+    }
+}
+
+struct IdentifiableRecording: Identifiable {
+    let id: String
+    let recording: Recording
+    
+    init(recording: Recording) {
+        self.id = recording.id
+        self.recording = recording
     }
 }
 
@@ -40,6 +51,7 @@ struct SearchView: View {
     @State private var chatMessages: [ChatMessage] = []
     @State private var isTyping = false
     @State private var selectedSourceTask: IdentifiableTask?
+    @State private var selectedSourceRecording: IdentifiableRecording?
     @Namespace private var animation
     
     var body: some View {
@@ -75,12 +87,22 @@ struct SearchView: View {
             ), task: identifiableTask.task)
             .environmentObject(appState)
         }
+        .sheet(item: $selectedSourceRecording) { identifiableRecording in
+            RecordingDetailSheet(
+                recording: identifiableRecording.recording,
+                isPresented: Binding(
+                    get: { selectedSourceRecording != nil },
+                    set: { if !$0 { selectedSourceRecording = nil } }
+                )
+            )
+            .environmentObject(appState)
+        }
     }
     
     // MARK: - Source Tap Handler
     
     private func handleSourceTap(_ source: SearchResult) {
-        // Find the task in appState.tasks that matches this source
+        // Handle tasks
         if source.type == "task" {
             // Try to find task by ID from metadata or by matching content
             if let taskId = source.metadata["taskId"]?.value as? String,
@@ -95,8 +117,24 @@ struct SearchView: View {
                 }
             }
         }
-        // For recordings and meetings, we could show similar detail views
-        // For now, only tasks are supported
+        // Handle recordings
+        else if source.type == "recording" {
+            // Try to find recording by ID from metadata or by matching content
+            if let recordingId = source.metadata["recordingId"]?.value as? String,
+               let recording = appState.recordings.first(where: { $0.id == recordingId }) {
+                selectedSourceRecording = IdentifiableRecording(recording: recording)
+            } else if let recording = appState.recordings.first(where: { $0.id == source.id }) {
+                selectedSourceRecording = IdentifiableRecording(recording: recording)
+            } else {
+                // Fallback: try to match by title or transcript
+                if let recording = appState.recordings.first(where: { 
+                    ($0.title != nil && source.content.contains($0.title!)) ||
+                    ($0.transcript != nil && source.content.contains($0.transcript!.prefix(50)))
+                }) {
+                    selectedSourceRecording = IdentifiableRecording(recording: recording)
+                }
+            }
+        }
     }
     
     // MARK: - Header
@@ -604,5 +642,198 @@ struct SearchResultRow: View {
         case "meeting": return Image(systemName: "person.2.fill")
         default: return Image(systemName: "doc")
         }
+    }
+}
+
+// MARK: - Recording Detail Sheet
+
+struct RecordingDetailSheet: View {
+    @EnvironmentObject var appState: AppState
+    let recording: Recording
+    @Binding var isPresented: Bool
+    @StateObject private var audioPlayer = AudioPlayerManager()
+    @State private var presignedUrl: URL?
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Button("Close") {
+                    audioPlayer.stop()
+                    isPresented = false
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                
+                Spacer()
+                
+                Text("Recording")
+                    .messyFont(.headline)
+                
+                Spacer()
+                
+                // Placeholder for symmetry
+                Text("Close").opacity(0)
+            }
+            .padding(16)
+            .background(Color(nsColor: .windowBackgroundColor))
+            
+            Divider()
+            
+            ScrollView {
+                VStack(spacing: 20) {
+                    // Recording info card
+                    VStack(spacing: 16) {
+                        // Play button
+                        Button {
+                            Task {
+                                if audioPlayer.isPlaying {
+                                    audioPlayer.pause()
+                                } else {
+                                    await playAudio()
+                                }
+                            }
+                        } label: {
+                            ZStack {
+                                Circle()
+                                    .fill(Color.messyBrand)
+                                    .frame(width: 70, height: 70)
+                                    .shadow(color: Color.messyBrand.opacity(0.4), radius: 10, y: 5)
+                                
+                                if audioPlayer.isLoading {
+                                    ProgressView()
+                                        .tint(.white)
+                                } else {
+                                    Image(systemName: audioPlayer.isPlaying ? "pause.fill" : "play.fill")
+                                        .font(.title)
+                                        .foregroundStyle(.white)
+                                }
+                            }
+                        }
+                        .buttonStyle(BouncyButtonStyle())
+                        .disabled(recording.audioUrl == nil)
+                        
+                        // Title
+                        Text(recording.title ?? "Recording")
+                            .messyFont(.headline)
+                        
+                        // Progress
+                        if audioPlayer.duration > 0 {
+                            VStack(spacing: 8) {
+                                // Progress bar
+                                GeometryReader { geo in
+                                    ZStack(alignment: .leading) {
+                                        Capsule()
+                                            .fill(Color.secondary.opacity(0.2))
+                                            .frame(height: 6)
+                                        
+                                        Capsule()
+                                            .fill(Color.messyBrand)
+                                            .frame(width: geo.size.width * (audioPlayer.currentTime / audioPlayer.duration), height: 6)
+                                    }
+                                }
+                                .frame(height: 6)
+                                
+                                // Time labels
+                                HStack {
+                                    Text(formatDuration(Int(audioPlayer.currentTime)))
+                                        .monospacedDigit()
+                                    Spacer()
+                                    Text(formatDuration(Int(audioPlayer.duration)))
+                                        .monospacedDigit()
+                                }
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal, 20)
+                        } else {
+                            Text(formatDuration(recording.durationSeconds ?? 0))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        
+                        // Date
+                        if let date = recording.createdAt {
+                            Text(date.formatted(date: .long, time: .shortened))
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .padding(24)
+                    .frame(maxWidth: .infinity)
+                    .background(
+                        GlassMorphicCard(cornerRadius: 16, opacity: 0.5) { Color.clear }
+                    )
+                    
+                    // Transcript
+                    if let transcript = recording.transcript, !transcript.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack {
+                                Image(systemName: "text.quote")
+                                    .foregroundStyle(Color.messyBrand)
+                                Text("Transcript")
+                                    .messyFont(.headline)
+                            }
+                            
+                            Text(transcript)
+                                .font(.system(size: 14))
+                                .foregroundStyle(.primary.opacity(0.9))
+                                .textSelection(.enabled)
+                                .lineSpacing(4)
+                        }
+                        .padding(20)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            GlassMorphicCard(cornerRadius: 16, opacity: 0.5) { Color.clear }
+                        )
+                    } else {
+                        VStack(spacing: 12) {
+                            Image(systemName: "text.quote")
+                                .font(.title)
+                                .foregroundStyle(.tertiary)
+                            Text("No transcript available")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(24)
+                        .background(
+                            GlassMorphicCard(cornerRadius: 16, opacity: 0.3) { Color.clear }
+                        )
+                    }
+                }
+                .padding(20)
+            }
+        }
+        .frame(width: 400, height: 500)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .onDisappear {
+            audioPlayer.stop()
+        }
+    }
+    
+    private func playAudio() async {
+        // If we already have a presigned URL and player is just paused, resume
+        if let url = presignedUrl, audioPlayer.currentTime > 0 {
+            audioPlayer.play(url: url)
+            return
+        }
+        
+        // Fetch presigned URL from backend
+        audioPlayer.isLoading = true
+        do {
+            let response = try await APIClient.shared.getAudioUrl(recordingId: recording.id)
+            if let url = URL(string: response.url) {
+                presignedUrl = url
+                audioPlayer.play(url: url)
+            }
+        } catch {
+            print("Failed to get audio URL: \(error)")
+            audioPlayer.isLoading = false
+        }
+    }
+    
+    private func formatDuration(_ seconds: Int) -> String {
+        return String(format: "%d:%02d", seconds / 60, seconds % 60)
     }
 }

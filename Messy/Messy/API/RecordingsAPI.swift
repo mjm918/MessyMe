@@ -26,11 +26,13 @@ extension APIClient {
         type: RecordingType,
         title: String? = nil,
         transcript: String? = nil,
+        audioUrl: String? = nil,
         durationSeconds: Int? = nil
     ) async throws -> Recording {
         var request = CreateRecordingRequest(userId: userId, type: type)
         request.title = title
         request.transcript = transcript
+        request.audioUrl = audioUrl
         request.durationSeconds = durationSeconds
 
         let queryItems = [URLQueryItem(name: "orgId", value: orgId)]
@@ -50,12 +52,14 @@ extension APIClient {
         type: RecordingType? = nil,
         title: String? = nil,
         transcript: String? = nil,
+        audioUrl: String? = nil,
         durationSeconds: Int? = nil
     ) async throws -> Recording {
         var request = UpdateRecordingRequest()
         request.type = type
         request.title = title
         request.transcript = transcript
+        request.audioUrl = audioUrl
         request.durationSeconds = durationSeconds
 
         return try await put(path: "/recordings/\(id)", body: request)
@@ -66,4 +70,33 @@ extension APIClient {
     func deleteRecording(id: String) async throws -> MessageResponse {
         try await delete(path: "/recordings/\(id)")
     }
+    
+    /// Get presigned audio URL for playback
+    /// GET /recordings/:id/audio-url
+    func getAudioUrl(recordingId: String) async throws -> AudioUrlResponse {
+        try await get(path: "/recordings/\(recordingId)/audio-url")
+    }
+    
+    /// Upload audio file to S3
+    /// POST /recordings/upload
+    func uploadAudio(orgId: String, audioData: Data, filename: String) async throws -> UploadResponse {
+        let queryItems = [URLQueryItem(name: "orgId", value: orgId)]
+        return try await uploadMultipart(
+            path: "/recordings/upload",
+            queryItems: queryItems,
+            fileData: audioData,
+            filename: filename,
+            fieldName: "audio",
+            mimeType: "audio/mp4"
+        )
+    }
+}
+
+struct UploadResponse: Codable {
+    let audioUrl: String
+    let filename: String
+}
+
+struct AudioUrlResponse: Codable {
+    let url: String
 }

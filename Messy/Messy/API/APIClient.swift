@@ -249,4 +249,61 @@ final class APIClient: ObservableObject {
     func delete(path: String) async throws {
         try await requestWithoutResponse(method: .delete, path: path)
     }
+    
+    // MARK: - Multipart Upload
+    
+    func uploadMultipart<T: Decodable>(
+        path: String,
+        queryItems: [URLQueryItem]? = nil,
+        fileData: Data,
+        filename: String,
+        fieldName: String,
+        mimeType: String
+    ) async throws -> T {
+        let url = try buildURL(path: path, queryItems: queryItems)
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        
+        let boundary = UUID().uuidString
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        
+        // Add auth header if available
+        if let email = currentUserEmail {
+            request.setValue(email, forHTTPHeaderField: "X-User-Email")
+        }
+        
+        // Build multipart body
+        var body = Data()
+        
+        // Add file data
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"\(fieldName)\"; filename=\"\(filename)\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: \(mimeType)\r\n\r\n".data(using: .utf8)!)
+        body.append(fileData)
+        body.append("\r\n".data(using: .utf8)!)
+        
+        // End boundary
+        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+        
+        request.httpBody = body
+        
+        let (data, response) = try await session.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw APIError.invalidResponse
+        }
+        
+        if httpResponse.statusCode >= 400 {
+            if let errorResponse = try? decoder.decode(ErrorResponse.self, from: data) {
+                throw APIError.httpError(statusCode: httpResponse.statusCode, message: errorResponse.error)
+            }
+            throw APIError.httpError(statusCode: httpResponse.statusCode, message: nil)
+        }
+        
+        do {
+            return try decoder.decode(T.self, from: data)
+        } catch {
+            throw APIError.decodingError(error)
+        }
+    }
 }

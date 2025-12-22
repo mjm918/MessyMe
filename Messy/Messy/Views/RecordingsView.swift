@@ -7,6 +7,7 @@
 
 import SwiftUI
 import AVFoundation
+import Speech
 import Combine
 
 struct RecordingsView: View {
@@ -185,13 +186,70 @@ struct RecordingsView: View {
 
     private func stopRecording() {
         audioManager.stopRecording { url, duration in
+            guard let audioUrl = url else { return }
+            
             Task {
-                await appState.createRecording(
+                // Read audio file data
+                guard let audioData = try? Data(contentsOf: audioUrl) else {
+                    print("Failed to read audio file")
+                    return
+                }
+                
+                let filename = audioUrl.lastPathComponent
+                let title = "\(recordingType == .voiceMemo ? "Memo" : "Meeting") \(Date().formatted(date: .numeric, time: .shortened))"
+                
+                // Transcribe the audio
+                let transcript = await transcribeAudio(url: audioUrl)
+                
+                // Upload and create recording
+                await appState.uploadAndCreateRecording(
                     type: recordingType,
-                    title: "\(recordingType == .voiceMemo ? "Memo" : "Meeting") \(Date().formatted(date: .numeric, time: .shortened))",
-                    transcript: nil,
+                    title: title,
+                    transcript: transcript,
+                    audioData: audioData,
+                    filename: filename,
                     duration: Int(duration)
                 )
+                
+                // Clean up local file
+                try? FileManager.default.removeItem(at: audioUrl)
+            }
+        }
+    }
+    
+    private func transcribeAudio(url: URL) async -> String? {
+        // Check authorization
+        let authStatus = await withCheckedContinuation { continuation in
+            SFSpeechRecognizer.requestAuthorization { status in
+                continuation.resume(returning: status)
+            }
+        }
+        
+        guard authStatus == .authorized else {
+            print("Speech recognition not authorized")
+            return nil
+        }
+        
+        guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US")),
+              recognizer.isAvailable else {
+            print("Speech recognizer not available")
+            return nil
+        }
+        
+        let request = SFSpeechURLRecognitionRequest(url: url)
+        request.shouldReportPartialResults = false
+        
+        return await withCheckedContinuation { continuation in
+            recognizer.recognitionTask(with: request) { result, error in
+                if let error = error {
+                    print("Transcription failed: \(error)")
+                    continuation.resume(returning: nil)
+                    return
+                }
+                
+                if let result = result, result.isFinal {
+                    continuation.resume(returning: result.bestTranscription.formattedString)
+                }
             }
         }
     }
@@ -217,50 +275,252 @@ struct RecordingsView: View {
 struct RecordingRowView: View {
     @EnvironmentObject var appState: AppState
     let recording: Recording
-    @State private var isPlaying = false
+    @StateObject private var audioPlayer = AudioPlayerManager()
     @State private var isHovered = false
+    @State private var showTranscript = false
+    @State private var presignedUrl: URL?
 
     var body: some View {
-        HStack(spacing: 16) {
-            Button { isPlaying.toggle() } label: {
-                Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                    .font(.system(size: 32))
-                    .foregroundStyle(Color.messyBrand)
-            }
-            .buttonStyle(.plain)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(recording.title ?? "Recording")
-                    .messyFont(.headline)
-                
-                HStack {
-                    Text(formatDuration(recording.durationSeconds ?? 0))
-                    Text("•")
-                    Text(recording.createdAt?.formatted() ?? "")
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-            
-            Spacer()
-            
-            if isHovered {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 16) {
+                // Play/Pause button
                 Button {
-                    Task { await appState.deleteRecording(recording) }
+                    Task {
+                        if audioPlayer.isPlaying {
+                            audioPlayer.pause()
+                        } else {
+                            await playAudio()
+                        }
+                    }
                 } label: {
-                    Image(systemName: "trash")
-                        .foregroundStyle(.red)
+                    ZStack {
+                        Circle()
+                            .fill(Color.messyBrand.opacity(0.1))
+                            .frame(width: 44, height: 44)
+                        
+                        if audioPlayer.isLoading {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                        } else {
+                            Image(systemName: audioPlayer.isPlaying ? "pause.fill" : "play.fill")
+                                .font(.system(size: 18))
+                                .foregroundStyle(Color.messyBrand)
+                        }
+                    }
                 }
                 .buttonStyle(.plain)
+                .disabled(recording.audioUrl == nil)
+                .opacity(recording.audioUrl == nil ? 0.5 : 1)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(recording.title ?? "Recording")
+                        .messyFont(.caption)
+                    
+                    HStack(spacing: 8) {
+                        // Duration / Progress
+                        if audioPlayer.isPlaying || audioPlayer.currentTime > 0 {
+                            Text(formatDuration(Int(audioPlayer.currentTime)))
+                                .monospacedDigit()
+                            Text("/")
+                        }
+                        Text(formatDuration(recording.durationSeconds ?? 0))
+                        
+                        Text("•")
+                        
+                        Text(recording.createdAt?.formatted(date: .abbreviated, time: .shortened) ?? "")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    
+                    // Progress bar
+                    if audioPlayer.duration > 0 {
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                Capsule()
+                                    .fill(Color.secondary.opacity(0.2))
+                                    .frame(height: 4)
+                                
+                                Capsule()
+                                    .fill(Color.messyBrand)
+                                    .frame(width: geo.size.width * (audioPlayer.currentTime / audioPlayer.duration), height: 4)
+                            }
+                        }
+                        .frame(height: 4)
+                        .padding(.top, 4)
+                    }
+                }
+                
+                Spacer()
+                
+                HStack(spacing: 8) {
+                    // Transcript button
+                    if recording.transcript != nil {
+                        Button {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                showTranscript.toggle()
+                            }
+                        } label: {
+                            Image(systemName: showTranscript ? "text.quote.rtl" : "text.quote")
+                                .foregroundStyle(showTranscript ? Color.messyBrand : .secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    
+                    if isHovered {
+                        Button {
+                            Task { await appState.deleteRecording(recording) }
+                        } label: {
+                            Image(systemName: "trash")
+                                .foregroundStyle(.red)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .padding(16)
+            
+            // Transcript section
+            if showTranscript, let transcript = recording.transcript {
+                VStack(alignment: .leading, spacing: 8) {
+                    Divider()
+                    
+                    Text("Transcript")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    
+                    Text(transcript)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.primary.opacity(0.9))
+                        .textSelection(.enabled)
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 16)
             }
         }
-        .padding(16)
         .background(GlassMorphicCard(cornerRadius: 12, opacity: isHovered ? 0.7 : 0.4) { Color.clear })
         .onHover { isHovered = $0 }
     }
     
+    private func playAudio() async {
+        // If we already have a presigned URL and player is just paused, resume
+        if let url = presignedUrl, audioPlayer.currentTime > 0 {
+            audioPlayer.play(url: url)
+            return
+        }
+        
+        // Fetch presigned URL from backend
+        audioPlayer.isLoading = true
+        do {
+            let response = try await APIClient.shared.getAudioUrl(recordingId: recording.id)
+            if let url = URL(string: response.url) {
+                presignedUrl = url
+                audioPlayer.play(url: url)
+            }
+        } catch {
+            print("Failed to get audio URL: \(error)")
+            audioPlayer.isLoading = false
+        }
+    }
+    
     func formatDuration(_ seconds: Int) -> String {
         return String(format: "%d:%02d", seconds / 60, seconds % 60)
+    }
+}
+
+// MARK: - Audio Player Manager
+
+@MainActor
+class AudioPlayerManager: NSObject, ObservableObject {
+    @Published var isPlaying = false
+    @Published var isLoading = false
+    @Published var currentTime: TimeInterval = 0
+    @Published var duration: TimeInterval = 0
+    
+    private var player: AVPlayer?
+    private var timeObserver: Any?
+    
+    override init() {
+        super.init()
+    }
+    
+    func play(url: URL) {
+        // If same URL and paused, just resume
+        if let currentItem = player?.currentItem,
+           (currentItem.asset as? AVURLAsset)?.url == url,
+           player?.rate == 0 {
+            player?.play()
+            isPlaying = true
+            return
+        }
+        
+        // New URL - create new player
+        isLoading = true
+        
+        let playerItem = AVPlayerItem(url: url)
+        player = AVPlayer(playerItem: playerItem)
+        
+        // Observe when ready to play
+        playerItem.addObserver(self, forKeyPath: "status", options: [.new], context: nil)
+        
+        // Observe playback end
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(playerDidFinishPlaying),
+            name: .AVPlayerItemDidPlayToEndTime,
+            object: playerItem
+        )
+        
+        // Add time observer
+        timeObserver = player?.addPeriodicTimeObserver(
+            forInterval: CMTime(seconds: 0.1, preferredTimescale: 600),
+            queue: .main
+        ) { [weak self] time in
+            Task { @MainActor in
+                self?.currentTime = time.seconds
+                if let duration = self?.player?.currentItem?.duration.seconds, duration.isFinite {
+                    self?.duration = duration
+                }
+            }
+        }
+        
+        player?.play()
+        isPlaying = true
+    }
+    
+    func pause() {
+        player?.pause()
+        isPlaying = false
+    }
+    
+    func stop() {
+        player?.pause()
+        player?.seek(to: .zero)
+        isPlaying = false
+        currentTime = 0
+    }
+    
+    @objc private func playerDidFinishPlaying() {
+        isPlaying = false
+        currentTime = 0
+        player?.seek(to: .zero)
+    }
+    
+    override nonisolated func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey : Any]?, context: UnsafeMutableRawPointer?) {
+        if keyPath == "status" {
+            Task { @MainActor in
+                self.isLoading = false
+                if let duration = self.player?.currentItem?.duration.seconds, duration.isFinite {
+                    self.duration = duration
+                }
+            }
+        }
+    }
+    
+    deinit {
+        if let observer = timeObserver {
+            player?.removeTimeObserver(observer)
+        }
+        NotificationCenter.default.removeObserver(self)
     }
 }
 

@@ -475,7 +475,7 @@ struct TagRowView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(isHovered ? Color(nsColor: .controlBackgroundColor).opacity(0.5) : Color.clear)
+        .background(Color.clear)
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.15)) {
                 isHovered = hovering

@@ -22,6 +22,7 @@ export const recordings = pgTable("recordings", {
   type: varchar("type", { length: 20 }).notNull(),
   title: varchar("title", { length: 500 }),
   transcript: text("transcript"),
+  audioUrl: text("audio_url"), // URL to the uploaded audio file
   durationSeconds: integer("duration_seconds"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
