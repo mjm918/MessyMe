@@ -8,6 +8,10 @@ const client = postgres({
   user: process.env.DB_USER!,
   password: process.env.DB_PASSWORD!,
   database: process.env.DB_NAME!,
+  max: 10,
+  idle_timeout: 20,
+  max_lifetime: 60 * 30,
+  connect_timeout: 10,
 });
 
 export const db = drizzle(client, { schema });

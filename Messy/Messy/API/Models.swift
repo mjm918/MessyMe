@@ -17,9 +17,7 @@ struct User: Codable, Identifiable {
     let updatedAt: Date?
 
     enum CodingKeys: String, CodingKey {
-        case id, email, name
-        case createdAt = "created_at"
-        case updatedAt = "updated_at"
+        case id, email, name, createdAt, updatedAt
     }
 }
 
@@ -39,11 +37,7 @@ struct Organization: Codable, Identifiable {
     let updatedAt: Date?
 
     enum CodingKeys: String, CodingKey {
-        case id, name
-        case inviteCode = "invite_code"
-        case adminUserId = "admin_user_id"
-        case createdAt = "created_at"
-        case updatedAt = "updated_at"
+        case id, name, inviteCode, adminUserId, createdAt, updatedAt
     }
 }
 
@@ -57,11 +51,7 @@ struct OrganizationWithMembers: Codable, Identifiable {
     let members: [OrgMember]?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, members
-        case inviteCode = "invite_code"
-        case adminUserId = "admin_user_id"
-        case createdAt = "created_at"
-        case updatedAt = "updated_at"
+        case id, name, members, inviteCode, adminUserId, createdAt, updatedAt
     }
 }
 
@@ -70,8 +60,7 @@ struct OrgMember: Codable {
     let joinedAt: Date?
 
     enum CodingKeys: String, CodingKey {
-        case user
-        case joinedAt = "joined_at"
+        case user, joinedAt
     }
 }
 
@@ -80,8 +69,7 @@ struct UserOrgMembership: Codable {
     let joinedAt: Date?
 
     enum CodingKeys: String, CodingKey {
-        case org
-        case joinedAt = "joined_at"
+        case org, joinedAt
     }
 }
 
@@ -137,18 +125,7 @@ struct TaskItem: Codable, Identifiable {
     var priorityReason: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, title, notes, priority, tags
-        case userId = "user_id"
-        case orgId = "org_id"
-        case dueDate = "due_date"
-        case dueTime = "due_time"
-        case locationContext = "location_context"
-        case isCompleted = "is_completed"
-        case completedAt = "completed_at"
-        case createdAt = "created_at"
-        case updatedAt = "updated_at"
-        case suggestedPriority = "suggested_priority"
-        case priorityReason = "priority_reason"
+        case id, title, notes, priority, tags, userId, orgId, dueDate, dueTime, locationContext, isCompleted, completedAt, createdAt, updatedAt, suggestedPriority, priorityReason
     }
 }
 
@@ -193,12 +170,7 @@ struct Recording: Codable, Identifiable {
     let updatedAt: Date?
 
     enum CodingKeys: String, CodingKey {
-        case id, type, title, transcript
-        case orgId = "org_id"
-        case userId = "user_id"
-        case durationSeconds = "duration_seconds"
-        case createdAt = "created_at"
-        case updatedAt = "updated_at"
+        case id, type, title, transcript, orgId, userId, durationSeconds, createdAt, updatedAt
     }
 }
 
@@ -231,12 +203,7 @@ struct Meeting: Codable, Identifiable {
     let updatedAt: Date?
 
     enum CodingKeys: String, CodingKey {
-        case id, title, notes, participants
-        case orgId = "org_id"
-        case userId = "user_id"
-        case meetingDate = "meeting_date"
-        case createdAt = "created_at"
-        case updatedAt = "updated_at"
+        case id, title, notes, participants, orgId, userId, meetingDate, createdAt, updatedAt
     }
 }
 
@@ -275,10 +242,7 @@ struct Location: Codable, Identifiable {
     let updatedAt: Date?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, type, address, latitude, longitude
-        case userId = "user_id"
-        case createdAt = "created_at"
-        case updatedAt = "updated_at"
+        case id, name, type, address, latitude, longitude, userId, createdAt, updatedAt
     }
 }
 
@@ -307,10 +271,7 @@ struct LocationHistory: Codable, Identifiable {
     let recordedAt: Date?
 
     enum CodingKeys: String, CodingKey {
-        case id, latitude, longitude
-        case userId = "user_id"
-        case locationId = "location_id"
-        case recordedAt = "recorded_at"
+        case id, latitude, longitude, userId, locationId, recordedAt
     }
 }
 
@@ -347,13 +308,7 @@ struct Break: Codable, Identifiable {
     let updatedAt: Date?
 
     enum CodingKeys: String, CodingKey {
-        case id, type, name
-        case userId = "user_id"
-        case scheduledTime = "scheduled_time"
-        case isRecurring = "is_recurring"
-        case recurrencePattern = "recurrence_pattern"
-        case createdAt = "created_at"
-        case updatedAt = "updated_at"
+        case id, type, name, userId, scheduledTime, isRecurring, recurrencePattern, createdAt, updatedAt
     }
 }
 
@@ -382,12 +337,7 @@ struct BreakHistory: Codable, Identifiable {
     let durationMinutes: Int?
 
     enum CodingKeys: String, CodingKey {
-        case id
-        case breakId = "break_id"
-        case userId = "user_id"
-        case startedAt = "started_at"
-        case endedAt = "ended_at"
-        case durationMinutes = "duration_minutes"
+        case id, breakId, userId, startedAt, endedAt, durationMinutes
     }
 }
 

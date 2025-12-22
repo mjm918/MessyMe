@@ -36,7 +36,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let button = statusItem.button {
             button.image = NSImage(systemSymbolName: "checklist", accessibilityDescription: "MessyMe")
             button.image?.isTemplate = true
-            button.action = #selector(togglePopover)
+            button.action = #selector(statusBarButtonClicked)
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
             button.target = self
         }
 
@@ -64,6 +65,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
     }
+    
+    @objc func statusBarButtonClicked(_ sender: NSStatusBarButton) {
+        let event = NSApp.currentEvent!
+        
+        if event.type == .rightMouseUp {
+            // Show context menu on right click
+            let menu = NSMenu()
+            menu.addItem(NSMenuItem(title: "Open MessyMe", action: #selector(togglePopover), keyEquivalent: ""))
+            menu.addItem(NSMenuItem.separator())
+            menu.addItem(NSMenuItem(title: "Quit MessyMe", action: #selector(quitApp), keyEquivalent: "q"))
+            
+            statusItem.menu = menu
+            statusItem.button?.performClick(nil)
+            statusItem.menu = nil // Reset so left click works normally
+        } else {
+            togglePopover()
+        }
+    }
 
     @objc func togglePopover() {
         guard let button = statusItem.button else { return }
@@ -75,6 +94,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.activate(ignoringOtherApps: true)
             popover.contentViewController?.view.window?.makeKey()
         }
+    }
+    
+    @objc func quitApp() {
+        NSApplication.shared.terminate(nil)
     }
 
     func applicationWillTerminate(_ notification: Notification) {

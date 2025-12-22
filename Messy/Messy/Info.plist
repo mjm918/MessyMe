@@ -44,6 +44,10 @@
 	</dict>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Messy needs access to the microphone to record voice memos and meetings.</string>
+	<key>NSLocationUsageDescription</key>
+	<string>Messy uses your location to save home and work addresses for location-based task suggestions.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Messy uses your location to save home and work addresses for location-based task suggestions.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 </dict>

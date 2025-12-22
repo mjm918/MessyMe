@@ -7,6 +7,7 @@
 
 import SwiftUI
 import Combine
+import AuthenticationServices
 
 // MARK: - Navigation
 
@@ -75,6 +76,7 @@ class AppState: ObservableObject {
     // MARK: - Search
     @Published var searchQuery = ""
     @Published var searchResults: [SearchResult] = []
+    @Published var aiAnswer: String?
 
     // MARK: - Breaks
     @Published var breaks: [Break] = []
@@ -83,6 +85,22 @@ class AppState: ObservableObject {
     // MARK: - Locations
     @Published var locations: [Location] = []
 
+    // MARK: - Tags
+    @Published var savedTags: [String] = [] {
+        didSet { saveTags() }
+    }
+    
+    /// All unique tags from tasks + saved tags
+    var availableTags: [String] {
+        var allTags = Set(savedTags)
+        for task in tasks {
+            if let taskTags = task.tags {
+                allTags.formUnion(taskTags)
+            }
+        }
+        return allTags.sorted()
+    }
+
     // MARK: - Error Handling
     @Published var errorMessage: String?
     @Published var showError = false
@@ -90,8 +108,121 @@ class AppState: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private let api = APIClient.shared
 
+    // MARK: - Persistence Keys
+    private let userEmailKey = "messy_user_email"
+    private let userIdKey = "messy_user_id"
+    private let orgIdKey = "messy_org_id"
+    private let savedTagsKey = "messy_saved_tags"
+
     private init() {
         setupBindings()
+        restoreTags()
+        restoreSession()
+    }
+
+    // MARK: - Session Persistence
+
+    private func restoreSession() {
+        guard let savedEmail = UserDefaults.standard.string(forKey: userEmailKey),
+              let savedUserId = UserDefaults.standard.string(forKey: userIdKey) else {
+            print("[AppState] No saved session found")
+            return
+        }
+
+        print("[AppState] Restoring session for: \(savedEmail)")
+
+        // Restore user and attempt to load data
+        Task {
+            await restoreUser(email: savedEmail, userId: savedUserId)
+        }
+    }
+
+    private func restoreUser(email: String, userId: String) async {
+        isLoading = true
+        defer { isLoading = false }
+
+        do {
+            // Get fresh user data
+            let user = try await api.createOrGetUser(email: email)
+            currentUser = user
+            isAuthenticated = true
+
+            // Restore org if saved
+            if let savedOrgId = UserDefaults.standard.string(forKey: orgIdKey) {
+                let memberships = try await api.getUserOrganizations(userId: user.id)
+                if let org = memberships.first(where: { $0.org.id == savedOrgId })?.org {
+                    currentOrg = org
+                    await loadData()
+                } else if let firstOrg = memberships.first?.org {
+                    currentOrg = firstOrg
+                    saveSession()
+                    await loadData()
+                }
+            } else {
+                let memberships = try await api.getUserOrganizations(userId: user.id)
+                if let firstOrg = memberships.first?.org {
+                    currentOrg = firstOrg
+                    saveSession()
+                    await loadData()
+                }
+            }
+
+            print("[AppState] Session restored successfully")
+        } catch {
+            print("[AppState] Failed to restore session: \(error)")
+            clearSession()
+        }
+    }
+
+    private func saveSession() {
+        guard let user = currentUser else { return }
+        UserDefaults.standard.set(user.email, forKey: userEmailKey)
+        UserDefaults.standard.set(user.id, forKey: userIdKey)
+        if let org = currentOrg {
+            UserDefaults.standard.set(org.id, forKey: orgIdKey)
+        }
+        print("[AppState] Session saved")
+    }
+
+    private func clearSession() {
+        UserDefaults.standard.removeObject(forKey: userEmailKey)
+        UserDefaults.standard.removeObject(forKey: userIdKey)
+        UserDefaults.standard.removeObject(forKey: orgIdKey)
+        print("[AppState] Session cleared")
+    }
+    
+    // MARK: - Tag Persistence
+    
+    private func restoreTags() {
+        if let tags = UserDefaults.standard.stringArray(forKey: savedTagsKey) {
+            savedTags = tags
+        }
+    }
+    
+    private func saveTags() {
+        UserDefaults.standard.set(savedTags, forKey: savedTagsKey)
+    }
+    
+    func addSavedTag(_ tag: String) {
+        let normalizedTag = tag.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !normalizedTag.isEmpty, !savedTags.contains(normalizedTag) else { return }
+        savedTags.append(normalizedTag)
+        savedTags.sort()
+    }
+    
+    func removeSavedTag(_ tag: String) {
+        savedTags.removeAll { $0 == tag }
+    }
+
+    func logout() {
+        clearSession()
+        currentUser = nil
+        currentOrg = nil
+        isAuthenticated = false
+        tasks = []
+        recordings = []
+        breaks = []
+        locations = []
     }
 
     private func setupBindings() {
@@ -105,30 +236,60 @@ class AppState: ObservableObject {
     }
 
     private func filterTasks(_ tasks: [TaskItem], for tab: NavigationTab) -> [TaskItem] {
-        let today = Calendar.current.startOfDay(for: Date())
-        let todayString = ISO8601DateFormatter().string(from: today).prefix(10)
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        
+        // Debug
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
 
+        let result: [TaskItem]
         switch tab {
         case .today:
-            return tasks.filter { task in
-                guard let dueDate = task.dueDate else { return false }
-                return dueDate.hasPrefix(String(todayString)) && !task.isCompleted
+            result = tasks.filter { task in
+                guard let dueDateString = task.dueDate else { return false }
+                
+                let dateFormatter = DateFormatter()
+                dateFormatter.dateFormat = "yyyy-MM-dd"
+                dateFormatter.timeZone = TimeZone.current 
+                
+                guard let taskDate = dateFormatter.date(from: String(dueDateString.prefix(10))) else {
+                    return false
+                }
+                
+                let isToday = calendar.isDate(taskDate, inSameDayAs: today)
+                return isToday && !task.isCompleted
             }
         case .all:
-            return tasks.filter { !$0.isCompleted }
+            result = tasks.filter { !$0.isCompleted }
         case .upcoming:
-            return tasks.filter { task in
-                guard let dueDate = task.dueDate else { return false }
-                return dueDate > String(todayString) && !task.isCompleted
+            result = tasks.filter { task in
+                guard let dueDateString = task.dueDate else { return false }
+                let dateFormatter = DateFormatter()
+                dateFormatter.dateFormat = "yyyy-MM-dd"
+                dateFormatter.timeZone = TimeZone.current
+                
+                guard let taskDate = dateFormatter.date(from: String(dueDateString.prefix(10))) else { return false }
+                
+                // Strictly greater than today
+                return taskDate > today && !calendar.isDate(taskDate, inSameDayAs: today) && !task.isCompleted
             }
         case .overdue:
-            return tasks.filter { task in
-                guard let dueDate = task.dueDate else { return false }
-                return dueDate < String(todayString) && !task.isCompleted
+            result = tasks.filter { task in
+                guard let dueDateString = task.dueDate else { return false }
+                let dateFormatter = DateFormatter()
+                dateFormatter.dateFormat = "yyyy-MM-dd"
+                dateFormatter.timeZone = TimeZone.current
+                
+                guard let taskDate = dateFormatter.date(from: String(dueDateString.prefix(10))) else { return false }
+                
+                return taskDate < today && !task.isCompleted
             }
         default:
-            return tasks
+            result = tasks
         }
+        
+        return result
     }
 
     // MARK: - Authentication
@@ -151,9 +312,11 @@ class AppState: ObservableObject {
             if let firstOrg = memberships.first?.org {
                 currentOrg = firstOrg
                 print("[AppState] Set current org: \(firstOrg.name)")
+                saveSession()
                 await loadData()
             } else {
                 print("[AppState] No organizations - showing org setup")
+                saveSession()
             }
         } catch {
             print("[AppState] Login error: \(error)")
@@ -169,6 +332,7 @@ class AppState: ObservableObject {
         do {
             let org = try await api.createOrganization(name: name, adminEmail: user.email)
             currentOrg = org
+            saveSession()
             await loadData()
         } catch {
             showError(error)
@@ -183,6 +347,7 @@ class AppState: ObservableObject {
         do {
             let response = try await api.joinOrganization(inviteCode: inviteCode, email: user.email)
             currentOrg = response.org
+            saveSession()
             await loadData()
         } catch {
             showError(error)
@@ -266,7 +431,7 @@ class AppState: ObservableObject {
         }
     }
 
-    func updateTask(_ task: TaskItem, title: String? = nil, notes: String? = nil, priority: TaskPriority? = nil, dueDate: String? = nil, tags: [String]? = nil) async {
+    func updateTask(_ task: TaskItem, title: String? = nil, notes: String? = nil, priority: TaskPriority? = nil, dueDate: String? = nil, tags: [String]? = nil, locationContext: LocationContext? = nil) async {
         do {
             let updated = try await api.updateTask(
                 id: task.id,
@@ -274,7 +439,8 @@ class AppState: ObservableObject {
                 notes: notes,
                 priority: priority,
                 dueDate: dueDate,
-                tags: tags
+                tags: tags,
+                locationContext: locationContext
             )
             if let index = tasks.firstIndex(where: { $0.id == task.id }) {
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
@@ -284,6 +450,26 @@ class AppState: ObservableObject {
         } catch {
             showError(error)
         }
+    }
+
+    func askAI(query: String) async {
+        guard let org = currentOrg, !query.isEmpty else { return }
+        isLoading = true // Reuse global loading or use specific state?
+        // Better to use local state in view, but since asking is significant, global loading is fine or we add isAskingAI
+        
+        do {
+            // We can reuse searchResults to show sources
+            let response = try await api.askAI(orgId: org.id, query: query)
+            withAnimation(.easeInOut(duration: 0.3)) {
+                // We'll store the answer in a new published property or use a callback.
+                // Since AppState is centralized, let's add `aiAnswer` property.
+                self.aiAnswer = response.answer
+                self.searchResults = response.sources
+            }
+        } catch {
+            showError(error)
+        }
+        isLoading = false
     }
 
     func toggleTaskCompletion(_ task: TaskItem) async {
@@ -361,6 +547,59 @@ class AppState: ObservableObject {
             let response = try await api.searchKnowledgeBase(orgId: org.id, query: query)
             withAnimation(.easeInOut(duration: 0.2)) {
                 searchResults = response.results
+            }
+        } catch {
+            showError(error)
+        }
+    }
+
+    // MARK: - Location Operations
+
+    func addLocation(name: String, type: LocationType?, address: String?, latitude: Double?, longitude: Double?) async {
+        guard let user = currentUser else { return }
+
+        do {
+            let location = try await api.createLocation(
+                userId: user.id,
+                name: name,
+                type: type,
+                address: address,
+                latitude: latitude,
+                longitude: longitude
+            )
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                locations.append(location)
+            }
+        } catch {
+            showError(error)
+        }
+    }
+
+    func updateLocation(_ location: Location, name: String?, type: LocationType?, address: String?, latitude: Double?, longitude: Double?) async {
+        do {
+            let updated = try await api.updateLocation(
+                id: location.id,
+                name: name,
+                type: type,
+                address: address,
+                latitude: latitude,
+                longitude: longitude
+            )
+            if let index = locations.firstIndex(where: { $0.id == location.id }) {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                    locations[index] = updated
+                }
+            }
+        } catch {
+            showError(error)
+        }
+    }
+
+    func deleteLocation(_ location: Location) async {
+        do {
+            _ = try await api.deleteLocation(id: location.id)
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                locations.removeAll { $0.id == location.id }
             }
         } catch {
             showError(error)

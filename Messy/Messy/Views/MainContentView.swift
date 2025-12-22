@@ -2,15 +2,20 @@
 //  MainContentView.swift
 //  Messy
 //
-//  Main content view with navigation sidebar
+//  Main content view with navigation sidebar - Apple-style UI
 //
 
 import SwiftUI
+import AuthenticationServices
 
 struct MainContentView: View {
     @EnvironmentObject var appState: AppState
+    @Namespace var animation
     @State private var hoverTab: NavigationTab?
-    @Namespace private var animation
+    
+    // We bind this to TaskListView and TaskDetailView to coordinate the hero animation
+    // Ideally these would be passed down or avail via environment, but for now we pass a namespace via a container if needed.
+    // Since we can't pass Namespace easily through Environment without wrapper, we'll organize proper structure.
 
     var body: some View {
         Group {
@@ -24,60 +29,80 @@ struct MainContentView: View {
                 LoginView()
             }
         }
-        .frame(width: 420, height: 600)
-        .background(Color(.windowBackgroundColor))
+        .frame(width: 480, height: 640)
+        .background(
+            ZStack {
+                Color(.windowBackgroundColor)
+                // Subtle animated gradient overlay - ORANGE Tint
+                RadialGradient(
+                    colors: [.messyBrand.opacity(0.04), .clear],
+                    center: .topTrailing,
+                    startRadius: 100,
+                    endRadius: 500
+                )
+            }
+        )
     }
 
     private var authenticatedView: some View {
-        HStack(spacing: 0) {
-            // Sidebar
-            sidebarView
-                .frame(width: 70)
-                .background(
-                    Color(.controlBackgroundColor)
-                        .opacity(0.5)
-                )
+        ZStack {
+            HStack(spacing: 0) {
+                // Enhanced Sidebar
+                sidebarView
+                    .frame(width: 70)
+                    .padding(4)
+                    .background(
+                        ZStack {
+                            VisualEffectBlur(material: .sidebar, blendingMode: .behindWindow)
+                            Color(.controlBackgroundColor).opacity(0.3)
+                        }
+                    )
+                
+                Divider()
+                    .opacity(0.5)
 
-            Divider()
-
-            // Main content
-            ZStack {
-                contentView
-                    .transition(.asymmetric(
-                        insertion: .move(edge: .trailing).combined(with: .opacity),
-                        removal: .move(edge: .leading).combined(with: .opacity)
-                    ))
+                // Main Content
+                ZStack {
+                    contentView
+                        .transition(.opacity)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .animation(.spring(response: 0.35, dampingFraction: 0.85), value: appState.selectedTab)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .animation(.spring(response: 0.35, dampingFraction: 0.85), value: appState.selectedTab)
-        }
-        .overlay(alignment: .top) {
+            .blur(radius: appState.isShowingTaskDetail ? 5 : 0) // Blur background when detail is open
+            .scaleEffect(appState.isShowingTaskDetail ? 0.98 : 1)
+            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: appState.isShowingTaskDetail)
+
+            // Hero Overlay for Task Detail
+            if appState.isShowingTaskDetail, let task = appState.selectedTask {
+                Color.black.opacity(0.2)
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                            appState.isShowingTaskDetail = false
+                        }
+                    }
+                    .transition(.opacity)
+                
+                TaskDetailView(isPresented: $appState.isShowingTaskDetail, task: task)
+                    .shadow(color: .black.opacity(0.2), radius: 20, y: 10)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .zIndex(100)
+            }
+            
+            // Error Banner
             errorBanner
         }
     }
 
-    // MARK: - Sidebar
+    // MARK: - Enhanced Sidebar
 
     private var sidebarView: some View {
-        VStack(spacing: 4) {
-            // App logo
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [.black, .gray.opacity(0.8)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 40, height: 40)
-
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(.white)
-            }
-            .padding(.top, 12)
-            .padding(.bottom, 16)
+        VStack(spacing: 8) {
+            // Animated App logo
+            AnimatedLogoView()
+                .padding(.top, 16)
+                .padding(.bottom, 12)
 
             // Navigation tabs
             ForEach(NavigationTab.allCases.filter { $0 != .settings }) { tab in
@@ -94,38 +119,38 @@ struct MainContentView: View {
 
     private func sidebarButton(for tab: NavigationTab) -> some View {
         Button {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
                 appState.selectedTab = tab
             }
         } label: {
             ZStack {
-                // Selection indicator
+                // Background Selection
                 if appState.selectedTab == tab {
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(Color.primary.opacity(0.1))
-                        .matchedGeometryEffect(id: "selection", in: animation)
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color.messyBrand.opacity(0.1))
+                        .matchedGeometryEffect(id: "nav_bg", in: animation)
                 }
 
                 // Hover state
                 if hoverTab == tab && appState.selectedTab != tab {
-                    RoundedRectangle(cornerRadius: 10)
+                    RoundedRectangle(cornerRadius: 12)
                         .fill(Color.primary.opacity(0.05))
                 }
 
                 VStack(spacing: 4) {
                     Image(systemName: tab.icon)
                         .font(.system(size: 18, weight: appState.selectedTab == tab ? .semibold : .regular))
-                        .foregroundStyle(appState.selectedTab == tab ? tab.color : .secondary)
-                        .symbolEffect(.bounce, value: appState.selectedTab == tab)
+                        .foregroundStyle(appState.selectedTab == tab ? Color.messyBrand : .secondary)
+                        .symbolEffect(.bounce.down, value: appState.selectedTab == tab)
 
                     Text(tab.rawValue.split(separator: " ").first ?? "")
-                        .font(.system(size: 9, weight: .medium))
+                        .font(.system(size: 10, weight: appState.selectedTab == tab ? .medium : .regular))
                         .foregroundStyle(appState.selectedTab == tab ? .primary : .secondary)
                 }
                 .frame(width: 54, height: 50)
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(BouncyButtonStyle())
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.15)) {
                 hoverTab = hovering ? tab : nil
@@ -149,336 +174,283 @@ struct MainContentView: View {
         }
     }
 
-    // MARK: - Error Banner
+    // MARK: - Enhanced Error Banner
 
     @ViewBuilder
     private var errorBanner: some View {
         if appState.showError, let message = appState.errorMessage {
-            HStack(spacing: 8) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.red)
+            VStack {
+                HStack(spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange) // Semantic warning color
 
-                Text(message)
-                    .font(.system(size: 12, weight: .medium))
-                    .lineLimit(1)
+                    Text(message)
+                        .messyFont(.caption)
+                        .lineLimit(1)
 
-                Spacer()
+                    Spacer()
 
-                Button {
-                    withAnimation {
-                        appState.showError = false
+                    Button {
+                        withAnimation {
+                            appState.showError = false
+                        }
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(.secondary)
                     }
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(.secondary)
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
+                .padding(12)
+                .background(
+                    GlassMorphicCard(cornerRadius: 12, opacity: 0.95) {
+                        Color.clear
+                    }
+                )
+                .shadow(color: .black.opacity(0.1), radius: 8, y: 4)
+                .padding(.horizontal, 30)
+                .padding(.top, 10)
+                .transition(.move(edge: .top).combined(with: .opacity))
+                
+                Spacer()
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color(.controlBackgroundColor))
-                    .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
-            )
-            .padding(.horizontal, 80)
-            .padding(.top, 8)
-            .transition(.move(edge: .top).combined(with: .opacity))
-            .zIndex(100)
+            .zIndex(200)
         }
     }
 }
 
-// MARK: - Login View
+// MARK: - Animated Logo View
+
+struct AnimatedLogoView: View {
+    @State private var isAnimating = false
+    
+    var body: some View {
+        ZStack {
+            // Clean Logo
+            Circle()
+                .fill(
+                    LinearGradient(
+                        colors: [.black, .gray.opacity(0.8)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 40, height: 40)
+                .shadow(color: .black.opacity(0.2), radius: 4, y: 2)
+
+            Image(systemName: "checkmark")
+                .font(.system(size: 20, weight: .bold))
+                .foregroundStyle(.messyBrand)
+        }
+    }
+}
+
+// MARK: - Visual Effect Blur (NSVisualEffectView wrapper)
+
+struct VisualEffectBlur: NSViewRepresentable {
+    var material: NSVisualEffectView.Material
+    var blendingMode: NSVisualEffectView.BlendingMode
+    
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = material
+        view.blendingMode = blendingMode
+        view.state = .active
+        return view
+    }
+    
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
+        nsView.material = material
+        nsView.blendingMode = blendingMode
+    }
+}
+
+// MARK: - Enhanced Login View (Cleaned Up)
 
 struct LoginView: View {
     @EnvironmentObject var appState: AppState
-    @State private var email = ""
-    @State private var isAnimating = false
-    @FocusState private var isEmailFocused: Bool
+    @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
-        VStack(spacing: 0) {
-            Spacer()
+        ZStack {
+            // Subtle ambient background
+            FloatingParticlesView(count: 10, color: .messyBrand)
+                .opacity(0.3)
+            
+            VStack(spacing: 24) {
+                Spacer()
 
-            // Logo animation
-            ZStack {
-                ForEach(0..<3) { i in
+                // Logo
+                ZStack {
                     Circle()
-                        .stroke(
+                        .fill(
                             LinearGradient(
-                                colors: [.black.opacity(0.3), .clear],
+                                colors: [.black, .gray.opacity(0.9)],
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 2
+                            )
                         )
-                        .frame(width: 80 + CGFloat(i * 30), height: 80 + CGFloat(i * 30))
-                        .scaleEffect(isAnimating ? 1.1 : 1)
-                        .opacity(isAnimating ? 0 : 0.5)
-                        .animation(
-                            .easeInOut(duration: 2)
-                            .repeatForever(autoreverses: false)
-                            .delay(Double(i) * 0.4),
-                            value: isAnimating
-                        )
+                        .frame(width: 80, height: 80)
+                        .shadow(color: .black.opacity(0.3), radius: 10, y: 5)
+                        .glow(color: .messyBrand, radius: 15)
+
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 36, weight: .bold))
+                        .foregroundStyle(.messyBrand)
                 }
 
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [.black, .gray.opacity(0.8)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 80, height: 80)
-                    .shadow(color: .black.opacity(0.2), radius: 10, y: 5)
-
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 40, weight: .semibold))
-                    .foregroundStyle(.white)
-            }
-            .onAppear { isAnimating = true }
-
-            Text("MessyMe")
-                .font(.system(size: 28, weight: .bold, design: .rounded))
-                .padding(.top, 24)
-
-            Text("Stay organized, stay focused")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(.secondary)
-                .padding(.top, 4)
-
-            Spacer()
-
-            // Login form
-            VStack(spacing: 16) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Email")
-                        .font(.system(size: 12, weight: .medium))
+                VStack(spacing: 8) {
+                    Text("MessyMe")
+                        .font(.system(size: 32, weight: .bold, design: .rounded))
+                    
+                    Text("Stay organized, stay focused")
+                        .messyFont(.body)
                         .foregroundStyle(.secondary)
-
-                    TextField("you@example.com", text: $email)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 14))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Color(.textBackgroundColor))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .stroke(isEmailFocused ? Color.primary.opacity(0.3) : Color.clear, lineWidth: 1)
-                                )
-                        )
-                        .focused($isEmailFocused)
-                        .onSubmit {
-                            login()
-                        }
                 }
 
-                Button {
-                    login()
-                } label: {
-                    ZStack {
-                        if appState.isLoading {
-                            ProgressView()
-                                .controlSize(.small)
-                                .colorScheme(.dark)
-                        } else {
-                            Text("Get Started")
-                                .font(.system(size: 14, weight: .semibold))
-                        }
+                Spacer()
+
+                // Enhanced Sign in
+                if appState.isLoading {
+                    ProgressView()
+                        .padding(.bottom, 20)
+                } else {
+                    SignInWithAppleButton(.signIn) { request in
+                        request.requestedScopes = [.email, .fullName]
+                    } onCompletion: { result in
+                        handleSignInWithApple(result)
                     }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 40)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(email.isEmpty ? Color.gray : Color.black)
-                    )
-                    .foregroundStyle(.white)
+                    .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
+                    .frame(height: 50)
+                    .frame(maxWidth: 260)
+                    .cornerRadius(12)
+                    .shadow(color: .black.opacity(0.1), radius: 4)
+                    .padding(.bottom, 50)
                 }
-                .buttonStyle(.plain)
-                .disabled(email.isEmpty || appState.isLoading)
             }
-            .padding(.horizontal, 40)
-            .padding(.bottom, 60)
         }
     }
 
-    private func login() {
-        guard !email.isEmpty else { return }
-        Task {
-            await appState.login(email: email)
+    private func handleSignInWithApple(_ result: Result<ASAuthorization, Error>) {
+        switch result {
+        case .success(let authorization):
+            if let appleIDCredential = authorization.credential as? ASAuthorizationAppleIDCredential {
+                let userIdentifier = appleIDCredential.user
+                let stableEmail = "\(userIdentifier)@apple.messy.id"
+                Task {
+                    await appState.login(email: stableEmail)
+                }
+            }
+        case .failure(let error):
+            print("Login failed: \(error.localizedDescription)")
         }
     }
 }
 
-// MARK: - Organization Setup View
+// MARK: - Organization Setup View (Cleaned Up)
 
 struct OrganizationSetupView: View {
     @EnvironmentObject var appState: AppState
     @State private var orgName = ""
     @State private var inviteCode = ""
     @State private var showJoinOrg = false
-    @FocusState private var isNameFocused: Bool
-    @FocusState private var isCodeFocused: Bool
 
     var body: some View {
-        VStack(spacing: 0) {
-            Spacer()
+        ZStack {
+            RadialGradient(
+                colors: [.messyBrand.opacity(0.05), .clear],
+                center: .top,
+                startRadius: 50,
+                endRadius: 400
+            )
+            
+            VStack(spacing: 30) {
+                Spacer()
 
-            // Icon
-            ZStack {
-                Circle()
-                    .fill(
+                // Icon
+                Image(systemName: "building.2.fill")
+                    .font(.system(size: 48))
+                    .foregroundStyle(
                         LinearGradient(
-                            colors: [.blue, .purple],
+                            colors: [.messyBrand, .orange.opacity(0.7)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
                     )
-                    .frame(width: 80, height: 80)
-                    .shadow(color: .blue.opacity(0.3), radius: 10, y: 5)
+                    .shadow(color: .messyBrand.opacity(0.3), radius: 10)
 
-                Image(systemName: "building.2.fill")
-                    .font(.system(size: 36, weight: .semibold))
-                    .foregroundStyle(.white)
-            }
-
-            Text("Set Up Your Workspace")
-                .font(.system(size: 24, weight: .bold, design: .rounded))
-                .padding(.top, 24)
-
-            Text("Create a new organization or join an existing one")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.top, 4)
-                .padding(.horizontal, 40)
-
-            Spacer()
-
-            // Forms
-            VStack(spacing: 20) {
-                if showJoinOrg {
-                    // Join org form
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Invite Code")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.secondary)
-
-                        TextField("Enter invite code", text: $inviteCode)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 14))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 10)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(Color(.textBackgroundColor))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .stroke(isCodeFocused ? Color.primary.opacity(0.3) : Color.clear, lineWidth: 1)
-                                    )
-                            )
-                            .focused($isCodeFocused)
-                            .onSubmit { joinOrg() }
-                    }
-
-                    Button { joinOrg() } label: {
-                        Text("Join Organization")
-                            .font(.system(size: 14, weight: .semibold))
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 40)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(inviteCode.isEmpty ? Color.gray : Color.blue)
-                            )
-                            .foregroundStyle(.white)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(inviteCode.isEmpty || appState.isLoading)
-
-                    Button { showJoinOrg = false } label: {
-                        Text("Create new organization instead")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.blue)
-                    }
-                    .buttonStyle(.plain)
-                } else {
-                    // Create org form
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Organization Name")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.secondary)
-
-                        TextField("My Team", text: $orgName)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 14))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 10)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(Color(.textBackgroundColor))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .stroke(isNameFocused ? Color.primary.opacity(0.3) : Color.clear, lineWidth: 1)
-                                    )
-                            )
-                            .focused($isNameFocused)
-                            .onSubmit { createOrg() }
-                    }
-
-                    Button { createOrg() } label: {
-                        ZStack {
-                            if appState.isLoading {
-                                ProgressView()
-                                    .controlSize(.small)
-                                    .colorScheme(.dark)
-                            } else {
-                                Text("Create Organization")
-                                    .font(.system(size: 14, weight: .semibold))
-                            }
-                        }
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 40)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(orgName.isEmpty ? Color.gray : Color.black)
-                        )
-                        .foregroundStyle(.white)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(orgName.isEmpty || appState.isLoading)
-
-                    Button { showJoinOrg = true } label: {
-                        Text("Join existing organization")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.blue)
-                    }
-                    .buttonStyle(.plain)
+                VStack(spacing: 8) {
+                    Text("Workspace Setup")
+                        .messyFont(.largeTitle)
+                    
+                    Text("Create or join a team to get started")
+                        .messyFont(.body)
+                        .foregroundStyle(.secondary)
                 }
+
+                if showJoinOrg {
+                    joinOrgForm
+                } else {
+                    createOrgForm
+                }
+                
+                Spacer()
             }
-            .padding(.horizontal, 40)
-            .padding(.bottom, 60)
-            .animation(.easeInOut(duration: 0.2), value: showJoinOrg)
+            .padding(40)
+            .animation(.spring, value: showJoinOrg)
         }
     }
+    
+    private var joinOrgForm: some View {
+        VStack(spacing: 16) {
+            TextField("Invite Code", text: $inviteCode)
+                .textFieldStyle(.plain)
+                .padding(12)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Color(.textBackgroundColor)))
+            
+            Button("Join Organization") {
+                Task { await appState.joinOrganization(inviteCode: inviteCode) }
+            }
+            .buttonStyle(BouncyButtonStyle())
+            .frame(maxWidth: .infinity)
+            .padding(12)
+            .background(Color.messyBrand)
+            .foregroundStyle(.white)
+            .cornerRadius(10)
+            .disabled(inviteCode.isEmpty)
 
-    private func createOrg() {
-        guard !orgName.isEmpty else { return }
-        Task {
-            await appState.createOrganization(name: orgName)
+            Button("Creat New Organization") { showJoinOrg = false }
+                .buttonStyle(.plain)
+                .foregroundStyle(.messyBrand)
+                .font(.caption)
         }
+        .transition(.move(edge: .trailing))
     }
+    
+    private var createOrgForm: some View {
+        VStack(spacing: 16) {
+            TextField("Organization Name", text: $orgName)
+                .textFieldStyle(.plain)
+                .padding(12)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Color(.textBackgroundColor)))
+            
+            Button("Create Organization") {
+                Task { await appState.createOrganization(name: orgName) }
+            }
+            .buttonStyle(BouncyButtonStyle())
+            .frame(maxWidth: .infinity)
+            .padding(12)
+            .background(Color.messyBrand)
+            .foregroundStyle(.white)
+            .cornerRadius(10)
+            .disabled(orgName.isEmpty)
 
-    private func joinOrg() {
-        guard !inviteCode.isEmpty else { return }
-        Task {
-            await appState.joinOrganization(inviteCode: inviteCode)
+            Button("Join Existing Organization") { showJoinOrg = true }
+                .buttonStyle(.plain)
+                .foregroundStyle(.messyBrand)
+                .font(.caption)
         }
+        .transition(.move(edge: .leading))
     }
 }
 
