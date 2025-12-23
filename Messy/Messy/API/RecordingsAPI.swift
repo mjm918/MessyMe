@@ -95,6 +95,8 @@ extension APIClient {
 struct UploadResponse: Codable {
     let audioUrl: String
     let filename: String
+    let transcript: String?
+    let languageCode: String?
 }
 
 struct AudioUrlResponse: Codable {

@@ -212,7 +212,7 @@ struct TaskRowView: View {
                             Constants.badge(text: priority.rawValue.capitalized, color: priorityColor(priority))
                         }
                         if let count = task.tags?.count, count > 0 {
-                            Constants.badge(text: "#tags", color: .secondary)
+                            Constants.badge(text: task.tags!.joined(separator: " "), color: .secondary)
                         }
                     }
                 }

@@ -7,7 +7,6 @@
 
 import SwiftUI
 import AVFoundation
-import Speech
 import Combine
 
 struct RecordingsView: View {
@@ -198,14 +197,10 @@ struct RecordingsView: View {
                 let filename = audioUrl.lastPathComponent
                 let title = "\(recordingType == .voiceMemo ? "Memo" : "Meeting") \(Date().formatted(date: .numeric, time: .shortened))"
                 
-                // Transcribe the audio
-                let transcript = await transcribeAudio(url: audioUrl)
-                
-                // Upload and create recording
+                // Upload and create recording - transcription is done on backend via ElevenLabs
                 await appState.uploadAndCreateRecording(
                     type: recordingType,
                     title: title,
-                    transcript: transcript,
                     audioData: audioData,
                     filename: filename,
                     duration: Int(duration)
@@ -213,43 +208,6 @@ struct RecordingsView: View {
                 
                 // Clean up local file
                 try? FileManager.default.removeItem(at: audioUrl)
-            }
-        }
-    }
-    
-    private func transcribeAudio(url: URL) async -> String? {
-        // Check authorization
-        let authStatus = await withCheckedContinuation { continuation in
-            SFSpeechRecognizer.requestAuthorization { status in
-                continuation.resume(returning: status)
-            }
-        }
-        
-        guard authStatus == .authorized else {
-            print("Speech recognition not authorized")
-            return nil
-        }
-        
-        guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US")),
-              recognizer.isAvailable else {
-            print("Speech recognizer not available")
-            return nil
-        }
-        
-        let request = SFSpeechURLRecognitionRequest(url: url)
-        request.shouldReportPartialResults = false
-        
-        return await withCheckedContinuation { continuation in
-            recognizer.recognitionTask(with: request) { result, error in
-                if let error = error {
-                    print("Transcription failed: \(error)")
-                    continuation.resume(returning: nil)
-                    return
-                }
-                
-                if let result = result, result.isFinal {
-                    continuation.resume(returning: result.bestTranscription.formattedString)
-                }
             }
         }
     }

@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { db, schema } from "../db";
 import { embedAndStore, deleteEmbedding } from "../services/qdrant";
 import { uploadToS3, deleteFromS3, getS3KeyFromUrl, getPresignedUrl } from "../services/s3";
+import { transcribeAudio } from "../services/transcription";
 
 const app = new Hono();
 
@@ -167,7 +168,7 @@ app.delete("/:id", async (c) => {
   return c.json({ message: "Recording deleted" });
 });
 
-// POST /recordings/upload - Upload audio file to S3
+// POST /recordings/upload - Upload audio file to S3 and transcribe
 app.post("/upload", async (c) => {
   const orgId = c.req.query("orgId");
   if (!orgId) {
@@ -196,11 +197,28 @@ app.post("/upload", async (c) => {
       ? "audio/wav"
       : "audio/mp4";
 
-  // Upload to S3
-  const buffer = await file.arrayBuffer();
-  const audioUrl = await uploadToS3(s3Key, Buffer.from(buffer), contentType);
+  // Get buffer for both S3 upload and transcription
+  const arrayBuffer = await file.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
 
-  return c.json({ audioUrl, filename }, 201);
+  // Upload to S3
+  const audioUrl = await uploadToS3(s3Key, buffer, contentType);
+
+  // Transcribe using ElevenLabs (non-blocking, return immediately)
+  // Transcription will be done and response includes it
+  let transcript: string | undefined;
+  let languageCode: string | undefined;
+
+  try {
+    const transcriptionResult = await transcribeAudio(buffer, filename);
+    transcript = transcriptionResult.text;
+    languageCode = transcriptionResult.languageCode;
+  } catch (err) {
+    console.error("Transcription failed:", err);
+    // Continue without transcript - audio is still uploaded
+  }
+
+  return c.json({ audioUrl, filename, transcript, languageCode }, 201);
 });
 
 // GET /recordings/:id/audio-url - Get presigned URL for audio playback

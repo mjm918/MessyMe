@@ -525,18 +525,18 @@ class AppState: ObservableObject {
         }
     }
     
-    func uploadAndCreateRecording(type: RecordingType, title: String?, transcript: String?, audioData: Data, filename: String, duration: Int?) async {
+    func uploadAndCreateRecording(type: RecordingType, title: String?, audioData: Data, filename: String, duration: Int?) async {
         guard let org = currentOrg else { return }
         
         do {
-            // First upload the audio file
+            // Upload the audio file - backend will transcribe using ElevenLabs
             let uploadResponse = try await api.uploadAudio(orgId: org.id, audioData: audioData, filename: filename)
             
-            // Then create the recording with the audio URL
+            // Create the recording with the audio URL and transcript from backend
             await createRecording(
                 type: type,
                 title: title,
-                transcript: transcript,
+                transcript: uploadResponse.transcript,
                 audioUrl: uploadResponse.audioUrl,
                 duration: duration
             )
