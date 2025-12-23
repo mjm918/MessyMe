@@ -158,6 +158,13 @@ enum RecordingType: String, Codable, CaseIterable {
     case meeting
 }
 
+enum TranscriptionStatus: String, Codable {
+    case pending
+    case processing
+    case completed
+    case failed
+}
+
 struct Recording: Codable, Identifiable {
     let id: String
     let orgId: String?
@@ -167,11 +174,14 @@ struct Recording: Codable, Identifiable {
     let transcript: String?
     let audioUrl: String?
     let durationSeconds: Int?
+    let transcriptionStatus: TranscriptionStatus?
+    let transcriptionError: String?
     let createdAt: Date?
     let updatedAt: Date?
 
     enum CodingKeys: String, CodingKey {
-        case id, type, title, transcript, audioUrl, orgId, userId, durationSeconds, createdAt, updatedAt
+        case id, type, title, transcript, audioUrl, orgId, userId, durationSeconds
+        case transcriptionStatus, transcriptionError, createdAt, updatedAt
     }
 }
 

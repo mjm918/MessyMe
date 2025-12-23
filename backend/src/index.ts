@@ -10,6 +10,7 @@ import { meetingsRoute } from "./routes/meetings";
 import { locationsRoute } from "./routes/locations";
 import { breaksRoute } from "./routes/breaks";
 import { aiRoute } from "./routes/ai";
+import { startWorker } from "./worker";
 
 const app = new Hono();
 
@@ -27,6 +28,11 @@ app.route("/meetings", meetingsRoute);
 app.route("/locations", locationsRoute);
 app.route("/breaks", breaksRoute);
 app.route("/ai", aiRoute);
+
+// Start background worker for async jobs
+startWorker().catch((err) => {
+  console.error("[Worker] Failed to start:", err.message);
+});
 
 export default {
   port: process.env.PORT || 3000,

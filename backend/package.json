@@ -23,6 +23,7 @@
     "@qdrant/js-client-rest": "^1.16.2",
     "ai": "^5.0.116",
     "drizzle-orm": "^0.45.1",
+    "graphile-worker": "^0.16.6",
     "hono": "^4.11.1",
     "postgres": "^3.4.7",
     "zod": "^4.2.1"

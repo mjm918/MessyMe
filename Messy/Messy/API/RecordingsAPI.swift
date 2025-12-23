@@ -77,7 +77,7 @@ extension APIClient {
         try await get(path: "/recordings/\(recordingId)/audio-url")
     }
     
-    /// Upload audio file to S3
+    /// Upload audio file to S3 (legacy - uploads through server)
     /// POST /recordings/upload
     func uploadAudio(orgId: String, audioData: Data, filename: String) async throws -> UploadResponse {
         let queryItems = [URLQueryItem(name: "orgId", value: orgId)]
@@ -90,6 +90,70 @@ extension APIClient {
             mimeType: "audio/mp4"
         )
     }
+    
+    // MARK: - Presigned Upload Flow (Async Transcription)
+    
+    /// Get presigned URL for direct S3 upload
+    /// GET /recordings/upload-url
+    func getUploadUrl(orgId: String, ext: String = "m4a") async throws -> PresignedUploadResponse {
+        let queryItems = [
+            URLQueryItem(name: "orgId", value: orgId),
+            URLQueryItem(name: "ext", value: ext)
+        ]
+        return try await get(path: "/recordings/upload-url", queryItems: queryItems)
+    }
+    
+    /// Upload file directly to S3 using presigned URL with progress tracking
+    func uploadToS3(presignedUrl: String, audioData: Data, contentType: String = "audio/mp4", progressHandler: ((Double) -> Void)? = nil) async throws {
+        guard let url = URL(string: presignedUrl) else {
+            throw APIError.invalidURL
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        request.setValue(String(audioData.count), forHTTPHeaderField: "Content-Length")
+        request.timeoutInterval = 300 // 5 min timeout for large files
+        
+        // Use URLSessionUploadTask with delegate for progress tracking
+        let delegate = UploadProgressDelegate(progressHandler: progressHandler)
+        let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
+        
+        let (_, response) = try await session.upload(for: request, from: audioData)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw APIError.invalidResponse
+        }
+        
+        guard (200...299).contains(httpResponse.statusCode) else {
+            throw APIError.httpError(statusCode: httpResponse.statusCode, message: "S3 upload failed")
+        }
+    }
+    
+    /// Create recording and queue transcription job
+    /// POST /recordings/create-with-transcription
+    func createRecordingWithTranscription(
+        orgId: String,
+        userId: String,
+        type: RecordingType,
+        title: String? = nil,
+        audioUrl: String,
+        durationSeconds: Int? = nil
+    ) async throws -> Recording {
+        var request = CreateRecordingRequest(userId: userId, type: type)
+        request.title = title
+        request.audioUrl = audioUrl
+        request.durationSeconds = durationSeconds
+        
+        let queryItems = [URLQueryItem(name: "orgId", value: orgId)]
+        return try await post(path: "/recordings/create-with-transcription", queryItems: queryItems, body: request)
+    }
+    
+    /// Get transcription status for a recording
+    /// GET /recordings/:id/transcription-status
+    func getTranscriptionStatus(recordingId: String) async throws -> TranscriptionStatusResponse {
+        try await get(path: "/recordings/\(recordingId)/transcription-status")
+    }
 }
 
 struct UploadResponse: Codable {
@@ -101,4 +165,34 @@ struct UploadResponse: Codable {
 
 struct AudioUrlResponse: Codable {
     let url: String
+}
+
+struct PresignedUploadResponse: Codable {
+    let uploadUrl: String
+    let audioUrl: String
+    let filename: String
+    let s3Key: String
+}
+
+struct TranscriptionStatusResponse: Codable {
+    let id: String
+    let transcriptionStatus: TranscriptionStatus?
+    let transcriptionError: String?
+    let transcript: String?
+}
+
+// MARK: - Upload Progress Delegate
+
+class UploadProgressDelegate: NSObject, URLSessionTaskDelegate {
+    private let progressHandler: ((Double) -> Void)?
+    
+    init(progressHandler: ((Double) -> Void)?) {
+        self.progressHandler = progressHandler
+        super.init()
+    }
+    
+    nonisolated func urlSession(_ session: URLSession, task: URLSessionTask, didSendBodyData bytesSent: Int64, totalBytesSent: Int64, totalBytesExpectedToSend: Int64) {
+        let progress = Double(totalBytesSent) / Double(totalBytesExpectedToSend)
+        progressHandler?(progress)
+    }
 }

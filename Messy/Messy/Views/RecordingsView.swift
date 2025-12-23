@@ -98,7 +98,35 @@ struct RecordingsView: View {
 
     private var recorderView: some View {
         VStack(spacing: 20) {
-            if audioManager.isRecording {
+            if appState.isUploadingRecording {
+                // Upload progress state
+                VStack(spacing: 16) {
+                    Text("Uploading...")
+                        .messyFont(.headline)
+                        .foregroundStyle(.primary)
+                    
+                    // Progress bar
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule()
+                                .fill(Color.secondary.opacity(0.2))
+                                .frame(height: 8)
+                            
+                            Capsule()
+                                .fill(Color.messyBrand)
+                                .frame(width: geo.size.width * appState.uploadProgress, height: 8)
+                                .animation(.easeInOut(duration: 0.2), value: appState.uploadProgress)
+                        }
+                    }
+                    .frame(height: 8)
+                    .frame(maxWidth: 200)
+                    
+                    Text("\(Int(appState.uploadProgress * 100))%")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+            } else if audioManager.isRecording {
                 // Time
                 Text(formatDuration(audioManager.recordingDuration))
                     .font(.system(size: 40, weight: .light, design: .monospaced))
@@ -125,54 +153,56 @@ struct RecordingsView: View {
             }
 
             // Controls
-            HStack(spacing: 40) {
-                if audioManager.isRecording {
+            if !appState.isUploadingRecording {
+                HStack(spacing: 40) {
+                    if audioManager.isRecording {
+                        Button {
+                            audioManager.cancelRecording()
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.title2)
+                                .foregroundStyle(.secondary)
+                                .frame(width: 50, height: 50)
+                                .background(Circle().fill(Color.secondary.opacity(0.1)))
+                        }
+                        .buttonStyle(BouncyButtonStyle())
+                    }
+
+                    // Main Button
                     Button {
-                        audioManager.cancelRecording()
+                        if audioManager.isRecording {
+                            stopRecording()
+                        } else {
+                            audioManager.startRecording()
+                        }
                     } label: {
-                        Image(systemName: "xmark")
-                            .font(.title2)
-                            .foregroundStyle(.secondary)
-                            .frame(width: 50, height: 50)
-                            .background(Circle().fill(Color.secondary.opacity(0.1)))
+                        ZStack {
+                            // Outer Glow
+                            if audioManager.isRecording {
+                                Circle()
+                                    .fill(Color.red.opacity(0.1))
+                                    .frame(width: 80, height: 80)
+                                    .scaleEffect(1.1)
+                                    .animation(.easeInOut(duration: 1).repeatForever(autoreverses: true), value: audioManager.isRecording)
+                            }
+                            
+                            // Button
+                            Circle()
+                                .fill(audioManager.isRecording ? Color.red : Color.messyBrand)
+                                .frame(width: 70, height: 70)
+                                .shadow(color: (audioManager.isRecording ? Color.red : Color.messyBrand).opacity(0.4), radius: 10, y: 5)
+                            
+                            Image(systemName: audioManager.isRecording ? "stop.fill" : "mic.fill")
+                                .font(.title)
+                                .foregroundStyle(.white)
+                        }
                     }
                     .buttonStyle(BouncyButtonStyle())
-                }
-
-                // Main Button
-                Button {
+                    
+                    // Spacer item to balance layout
                     if audioManager.isRecording {
-                        stopRecording()
-                    } else {
-                        audioManager.startRecording()
+                        Spacer().frame(width: 50) // Placeholder
                     }
-                } label: {
-                    ZStack {
-                        // Outer Glow
-                        if audioManager.isRecording {
-                            Circle()
-                                .fill(Color.red.opacity(0.1))
-                                .frame(width: 80, height: 80)
-                                .scaleEffect(1.1)
-                                .animation(.easeInOut(duration: 1).repeatForever(autoreverses: true), value: audioManager.isRecording)
-                        }
-                        
-                        // Button
-                        Circle()
-                            .fill(audioManager.isRecording ? Color.red : Color.messyBrand)
-                            .frame(width: 70, height: 70)
-                            .shadow(color: (audioManager.isRecording ? Color.red : Color.messyBrand).opacity(0.4), radius: 10, y: 5)
-                        
-                        Image(systemName: audioManager.isRecording ? "stop.fill" : "mic.fill")
-                            .font(.title)
-                            .foregroundStyle(.white)
-                    }
-                }
-                .buttonStyle(BouncyButtonStyle())
-                
-                // Spacer item to balance layout
-                if audioManager.isRecording {
-                    Spacer().frame(width: 50) // Placeholder
                 }
             }
         }
@@ -311,6 +341,32 @@ struct RecordingRowView: View {
                 Spacer()
                 
                 HStack(spacing: 8) {
+                    // Transcription status indicator
+                    if let status = recording.transcriptionStatus {
+                        switch status {
+                        case .pending, .processing:
+                            HStack(spacing: 4) {
+                                ProgressView()
+                                    .scaleEffect(0.6)
+                                Text(status == .pending ? "Queued" : "Transcribing...")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        case .failed:
+                            HStack(spacing: 4) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(.orange)
+                                    .font(.caption)
+                                Text("Failed")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .help(recording.transcriptionError ?? "Transcription failed")
+                        case .completed:
+                            EmptyView()
+                        }
+                    }
+                    
                     // Transcript button
                     if recording.transcript != nil {
                         Button {

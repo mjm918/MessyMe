@@ -72,6 +72,8 @@ class AppState: ObservableObject {
     // MARK: - Recordings
     @Published var recordings: [Recording] = []
     @Published var isRecording = false
+    @Published var isUploadingRecording = false
+    @Published var uploadProgress: Double = 0 // 0 to 1
 
     // MARK: - Search
     @Published var searchQuery = ""
@@ -526,22 +528,99 @@ class AppState: ObservableObject {
     }
     
     func uploadAndCreateRecording(type: RecordingType, title: String?, audioData: Data, filename: String, duration: Int?) async {
-        guard let org = currentOrg else { return }
+        guard let org = currentOrg, let user = currentUser else { return }
+        
+        isUploadingRecording = true
+        uploadProgress = 0
         
         do {
-            // Upload the audio file - backend will transcribe using ElevenLabs
-            let uploadResponse = try await api.uploadAudio(orgId: org.id, audioData: audioData, filename: filename)
+            // 1. Get presigned upload URL from backend
+            uploadProgress = 0.1
+            let uploadInfo = try await api.getUploadUrl(orgId: org.id, ext: "m4a")
             
-            // Create the recording with the audio URL and transcript from backend
-            await createRecording(
+            // 2. Upload directly to S3 (bypasses server timeout)
+            uploadProgress = 0.2
+            try await api.uploadToS3(presignedUrl: uploadInfo.uploadUrl, audioData: audioData) { progress in
+                Task { @MainActor in
+                    // Map S3 upload progress to 0.2-0.8 range
+                    self.uploadProgress = 0.2 + (progress * 0.6)
+                }
+            }
+            
+            // 3. Create recording and queue transcription job
+            uploadProgress = 0.9
+            let recording = try await api.createRecordingWithTranscription(
+                orgId: org.id,
+                userId: user.id,
                 type: type,
                 title: title,
-                transcript: uploadResponse.transcript,
-                audioUrl: uploadResponse.audioUrl,
-                duration: duration
+                audioUrl: uploadInfo.audioUrl,
+                durationSeconds: duration
             )
+            
+            uploadProgress = 1.0
+            
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                recordings.insert(recording, at: 0)
+            }
+            
+            // Brief delay to show completion
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            
+            isUploadingRecording = false
+            uploadProgress = 0
+            
+            // 4. Start polling for transcription completion
+            startTranscriptionPolling(for: recording.id)
         } catch {
+            isUploadingRecording = false
+            uploadProgress = 0
             showError(error)
+        }
+    }
+    
+    /// Poll for transcription status and update recording when complete
+    private func startTranscriptionPolling(for recordingId: String) {
+        Task {
+            var attempts = 0
+            let maxAttempts = 60 // Max 5 minutes polling (5s intervals)
+            
+            while attempts < maxAttempts {
+                try? await Task.sleep(nanoseconds: 5_000_000_000) // 5 seconds
+                attempts += 1
+                
+                do {
+                    let status = try await api.getTranscriptionStatus(recordingId: recordingId)
+                    
+                    switch status.transcriptionStatus {
+                    case .completed:
+                        // Update the recording in our list with the transcript
+                        if status.transcript != nil {
+                            if let recording = try? await api.getRecording(id: recordingId) {
+                                await MainActor.run {
+                                    if let index = recordings.firstIndex(where: { $0.id == recordingId }) {
+                                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                            recordings[index] = recording
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        return // Done
+                        
+                    case .failed:
+                        print("Transcription failed for \(recordingId): \(status.transcriptionError ?? "Unknown")")
+                        return // Stop polling
+                        
+                    case .pending, .processing, .none:
+                        continue // Keep polling
+                    }
+                } catch {
+                    print("Error polling transcription status: \(error)")
+                }
+            }
+            
+            print("Transcription polling timed out for \(recordingId)")
         }
     }
 

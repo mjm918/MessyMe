@@ -87,3 +87,32 @@ export async function getPresignedUrl(
 
   return await getSignedUrl(s3Client, command, { expiresIn });
 }
+
+/**
+ * Generate a presigned URL for uploading a file directly to S3
+ * This allows clients to upload files without going through our server
+ * @param key - The S3 object key where file will be stored
+ * @param contentType - The expected MIME type of the file
+ * @param expiresIn - Expiration time in seconds (default 1 hour)
+ * @returns The presigned upload URL
+ */
+export async function getPresignedUploadUrl(
+  key: string,
+  contentType: string,
+  expiresIn: number = 3600
+): Promise<string> {
+  const command = new PutObjectCommand({
+    Bucket: S3_BUCKET,
+    Key: key,
+    ContentType: contentType,
+  });
+
+  return await getSignedUrl(s3Client, command, { expiresIn });
+}
+
+/**
+ * Get the full S3 URL from a key
+ */
+export function getS3UrlFromKey(key: string): string {
+  return `https://${S3_BUCKET}.s3.${S3_REGION}.amazonaws.com/${key}`;
+}
